@@ -1,38 +1,61 @@
-const express = require('express');
-const router = express.Router();
-const Image = require('../models/Image');
+import express from "express";
+import Image from "../models/Image.js";
 
-// In-memory settings store for demo purposes. Replace with DB storage if needed.
+const router = express.Router();
+
+// 🧠 In-memory settings store (you can replace this with MongoDB later)
 let settings = {
   detectionThreshold: 0.5,
-  notifyEmail: '',
+  notifyEmail: "",
   maxObjects: 10,
   objects: null,
 };
 
-// GET /api/settings - returns settings plus live object counts aggregated from stored images
-router.get('/', async (req, res) => {
+/**
+ * ⚙️ GET /api/settings
+ * Returns global app settings + live object detection counts aggregated from images.
+ */
+router.get("/", async (req, res) => {
   try {
-    // aggregate counts of each detected object across images
+    // Aggregate counts of each detected object type from stored images
     const counts = await Image.aggregate([
-      { $unwind: { path: '$detections', preserveNullAndEmptyArrays: false } },
-      { $group: { _id: '$detections.object', count: { $sum: 1 } } },
+      { $unwind: { path: "$detections", preserveNullAndEmptyArrays: false } },
+      { $group: { _id: "$detections.object", count: { $sum: 1 } } },
     ]);
 
-    const objCounts = {};
-    (counts || []).forEach(c => { if (c._id) objCounts[c._id] = c.count });
+    const objectCounts = {};
+    (counts || []).forEach((c) => {
+      if (c._id) objectCounts[c._id] = c.count;
+    });
 
-    res.json({ ...settings, objectCounts: objCounts });
+    res.json({
+      ...settings,
+      objectCounts,
+    });
   } catch (err) {
-    console.error('settings.get error', err);
-    res.json(settings);
+    console.error("❌ settings.get error:", err);
+    res.status(500).json({
+      ...settings,
+      error: "Failed to load settings or object counts",
+    });
   }
 });
 
-router.put('/', (req, res) => {
-  const body = req.body || {};
-  settings = { ...settings, ...body };
-  res.json(settings);
+/**
+ * 🧩 PUT /api/settings
+ * Updates in-memory settings (used by frontend config panel).
+ */
+router.put("/", (req, res) => {
+  try {
+    const body = req.body || {};
+    settings = { ...settings, ...body };
+
+    console.log("⚙️ Settings updated:", settings);
+    res.json(settings);
+  } catch (err) {
+    console.error("❌ settings.put error:", err);
+    res.status(500).json({ error: "Failed to update settings" });
+  }
 });
 
-module.exports = router;
+export default router;

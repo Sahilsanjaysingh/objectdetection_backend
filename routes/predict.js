@@ -1,24 +1,63 @@
-const express = require('express');
+import express from "express";
+import multer from "multer";
+import fs from "fs";
+import fetch from "node-fetch";
+import FormData from "form-data";
+
 const router = express.Router();
-const multer = require('multer');
-const upload = multer({ dest: 'uploads/' });
-const { exec } = require('child_process');
 
-router.post('/', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).send('No file uploaded.');
-  }
+// Configure Multer for file uploads
+const UPLOAD_DIR = "uploads";
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-  const filePath = req.file.path;
-  const command = `python ../api/predict.py --image_path ${filePath}`;
-
-  exec(command, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`exec error: ${error}`);
-      return res.status(500).send(stderr);
-    }
-    res.send(stdout);
-  });
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) =>
+    cb(null, `${Date.now()}-${file.originalname.replace(/\s+/g, "_")}`),
 });
 
-module.exports = router;
+const upload = multer({ storage });
+
+/**
+ * 📤 POST /api/upload
+ * Uploads an image and sends it to the YOLO Hugging Face API for detection.
+ */
+router.post("/", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded." });
+
+    // Build FormData to send to Hugging Face YOLO model
+    const formData = new FormData();
+    formData.append("file", fs.createReadStream(req.file.path));
+
+    // Your Hugging Face Flask API endpoint (replace with your actual Space URL)
+    const hfEndpoint = "https://lodusahil-yolospacedetectionmodel.hf.space/predict";
+
+    // Send file to your deployed YOLO model
+    const response = await fetch(hfEndpoint, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      console.error("❌ YOLO API call failed:", response.statusText);
+      return res.status(500).json({ error: "YOLO API call failed" });
+    }
+
+    const predictions = await response.json();
+
+    // Cleanup local uploaded file after processing
+    fs.unlink(req.file.path, () => {});
+
+    // Send YOLO response back to frontend
+    res.json({
+      success: true,
+      predictions,
+    });
+  } catch (error) {
+    console.error("❌ Upload route error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export default router;
